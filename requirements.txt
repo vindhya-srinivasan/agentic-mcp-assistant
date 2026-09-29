@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+langgraph
+langchain-openai
+langchain-mcp-adapters
+python-dotenv
+mcp-server-fetch
+pytest
+httpx
