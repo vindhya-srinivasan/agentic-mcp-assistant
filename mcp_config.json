@@ -1,0 +1,17 @@
+{
+  "filesystem": {
+    "command": "mcp-server-filesystem",
+    "args": ["./workspace"],
+    "transport": "stdio"
+  },
+  "tavily": {
+    "command": "tavily-mcp",
+    "args": [],
+    "transport": "stdio"
+  },
+  "fetch": {
+    "command": "python",
+    "args": ["-m", "mcp_server_fetch"],
+    "transport": "stdio"
+  }
+}
