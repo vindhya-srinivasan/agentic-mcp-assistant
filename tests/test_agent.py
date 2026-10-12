@@ -51,3 +51,11 @@ def test_memory_is_session_scoped(run):
     same, other = run(scenario())
     assert "teal" in same.lower()
     assert "teal" not in other.lower()
+
+def test_recalls_previous_question(run):
+    async def scenario():
+        graph = await _graph()
+        await run_turn(graph, "What is the capital of France?", "recall-test")
+        return await run_turn(graph, "What did I ask you last?", "recall-test")
+
+    assert "capital" in run(scenario()).lower()

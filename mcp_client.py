@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 # Env vars a server needs. The server is skipped (not crashed) if any are missing.
 REQUIRED_ENV = {"tavily": ["TAVILY_API_KEY"]}
 DISCOVERY_TIMEOUT_SECONDS = 30
+TOOL_CALL_TIMEOUT_SECONDS = 45
 
 
 def load_connections(config_path: str) -> dict:
@@ -31,6 +32,18 @@ def load_connections(config_path: str) -> dict:
             conn["env"] = {var: os.environ[var] for var in required}
         connections[name] = conn
     return connections
+
+
+def _with_timeout(tool: BaseTool) -> BaseTool:
+    """Bound each tools/call so a slow or hung MCP server can't stall the whole request.
+    A timeout raises TimeoutError, which the agent's ToolNode turns into an error result."""
+    call = tool.coroutine
+
+    async def timed_call(*args, **kwargs):
+        return await asyncio.wait_for(call(*args, **kwargs), timeout=TOOL_CALL_TIMEOUT_SECONDS)
+
+    tool.coroutine = timed_call
+    return tool
 
 
 async def load_mcp_tools(config_path: str | None = None) -> tuple[list[BaseTool], dict[str, str]]:
@@ -54,6 +67,7 @@ async def load_mcp_tools(config_path: str | None = None) -> tuple[list[BaseTool]
         for tool in server_tools:
             # Tool execution errors come back to the LLM as text instead of raising.
             tool.handle_tool_error = True
+            _with_timeout(tool)
         tools.extend(server_tools)
         status[name] = f"ok ({len(server_tools)} tools)"
         logger.info("MCP server '%s': %d tools discovered", name, len(server_tools))
