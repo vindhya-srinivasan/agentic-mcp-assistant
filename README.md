@@ -169,7 +169,7 @@ Local development and the deployed service use the same cloud LLM backend (NVIDI
 | Server                        | Package                                                                                                                      | Transport | Tools                        | Used for                                                        |
 | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | --------- | ---------------------------- | --------------------------------------------------------------- |
 | Filesystem (required pair)    | [`@modelcontextprotocol/server-filesystem`](https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem) (Node) | stdio     | 14                           | Read, write, list and edit files, sandboxed to `/app/workspace` |
-| Tavily search (required pair) | [`tavily-mcp`](https://github.com/tavily-ai/tavily-mcp) (Node)                                                               | stdio     | 5, including `tavily-search` | Live web search for current information                         |
+| Tavily search (required pair) | [`tavily-mcp`](https://github.com/tavily-ai/tavily-mcp) (Node)                                                               | stdio     | 5, including `tavily_search` | Live web search for current information                         |
 | Fetch (additional)            | [`mcp-server-fetch`](https://github.com/modelcontextprotocol/servers/tree/main/src/fetch) (Python)                           | stdio     | 1 (`fetch`)                  | Read the full content of a specific URL as markdown             |
 
 All three are external open-source projects used as-is; none of them is reimplemented here. The server manifest is `mcp_config.json`. The Tavily key is not in that file; `mcp_client.py` injects `TAVILY_API_KEY` from the environment at startup and skips the Tavily server with a warning if the key is missing.
@@ -180,11 +180,13 @@ All three are external open-source projects used as-is; none of them is reimplem
 
 ## How tool selection works
 
-Tool choice is made by the LLM, not by keyword matching. On every reasoning step the model receives the system prompt (which describes when files, search, fetch, or no tool are appropriate), the conversation so far, and every discovered tool with its name, description and JSON Schema. It either returns tool calls with arguments that match those schemas, or answers directly. Each turn logs the tools the model chose, for example:
+Tool choice is made by the LLM, not by keyword matching. On every reasoning step the model receives the system prompt (which describes when files, search, fetch, or no tool are appropriate), the conversation so far, and every discovered tool with its name, description and JSON Schema. It either returns tool calls with arguments that match those schemas, or answers directly. Each turn logs the tools the model chose. Real lines from the deployed service:
 
 ```
-session=demo-5 tools_used=['tavily-search', 'fetch', 'write_file']
-session=demo-3 tools_used=none (answered directly)
+session=log-file tools_used=['list_directory', 'read_text_file']
+session=log-search tools_used=['tavily_search', 'fetch']
+session=log-chain tools_used=['tavily_search', 'fetch', 'fetch', 'tavily_search', 'fetch', 'fetch', 'write_file']
+session=grader-1 tools_used=none (answered directly)
 ```
 
 ---
