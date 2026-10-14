@@ -38,6 +38,12 @@ curl -s -X POST "$URL/chat" -H "Content-Type: application/json" \
   -d '{"query": "My name is Vindhya.", "session_id": "demo-4"}'
 curl -s -X POST "$URL/chat" -H "Content-Type: application/json" \
   -d '{"query": "What is my name?", "session_id": "demo-4"}'
+curl -s -X POST "$URL/chat" -H "Content-Type: application/json" \
+  -d '{"query": "What did I ask you last?", "session_id": "demo-4"}'
+
+# Session isolation: a different session_id has no memory of demo-4
+curl -s -X POST "$URL/chat" -H "Content-Type: application/json" \
+  -d '{"query": "What is my name?", "session_id": "demo-6"}'
 
 # Multi-step: search -> fetch -> write a file, then read it back
 curl -s -X POST "$URL/chat" -H "Content-Type: application/json" \
@@ -45,6 +51,8 @@ curl -s -X POST "$URL/chat" -H "Content-Type: application/json" \
 curl -s -X POST "$URL/chat" -H "Content-Type: application/json" \
   -d '{"query": "What does langgraph.md say?", "session_id": "demo-5"}'
 ```
+
+You can also open the `/docs` page, choose `POST /chat`, click **Try it out**, edit the JSON body and click **Execute**.
 
 **API contract**
 
@@ -137,8 +145,8 @@ flowchart LR
     end
 
     subgraph GCP["Google Cloud project csci-599-assignment-1-vindhya (us-west1)"]
-        CB["Cloud Build<br/>gcloud builds submit"]
-        AR["Artifact Registry<br/>gcr.io/PROJECT_ID/csci599-a1"]
+        CB["Cloud Build<br/>gcloud builds submit<br/>builds the Docker image"]
+        AR["Artifact Registry<br/>Docker image gcr.io/PROJECT_ID/csci599-a1"]
         RUN["Cloud Run service csci599-a1<br/>1 GiB, min 0 / max 1 instance"]
         URL["Live URL<br/>csci599-a1-697124537718.us-west1.run.app"]
     end
@@ -166,11 +174,11 @@ Local development and the deployed service use the same cloud LLM backend (NVIDI
 
 ## MCP servers
 
-| Server                        | Package                                                                                                                      | Transport | Tools                        | Used for                                                        |
-| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | --------- | ---------------------------- | --------------------------------------------------------------- |
-| Filesystem (required pair)    | [`@modelcontextprotocol/server-filesystem`](https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem) (Node) | stdio     | 14                           | Read, write, list and edit files, sandboxed to `/app/workspace` |
-| Tavily search (required pair) | [`tavily-mcp`](https://github.com/tavily-ai/tavily-mcp) (Node)                                                               | stdio     | 5, including `tavily_search` | Live web search for current information                         |
-| Fetch (additional)            | [`mcp-server-fetch`](https://github.com/modelcontextprotocol/servers/tree/main/src/fetch) (Python)                           | stdio     | 1 (`fetch`)                  | Read the full content of a specific URL as markdown             |
+| Server                           | Package                                                                                                                      | Transport | Tools                        | Used for                                                        |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | --------- | ---------------------------- | --------------------------------------------------------------- |
+| Filesystem (recommended pair)    | [`@modelcontextprotocol/server-filesystem`](https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem) (Node) | stdio     | 14                           | Read, write, list and edit files, sandboxed to `/app/workspace` |
+| Tavily search (recommended pair) | [`tavily-mcp`](https://github.com/tavily-ai/tavily-mcp) (Node)                                                               | stdio     | 5, including `tavily_search` | Live web search for current information                         |
+| Fetch (additional)               | [`mcp-server-fetch`](https://github.com/modelcontextprotocol/servers/tree/main/src/fetch) (Python)                           | stdio     | 1 (`fetch`)                  | Read the full content of a specific URL as markdown             |
 
 All three are external open-source projects used as-is; none of them is reimplemented here. The server manifest is `mcp_config.json`. The Tavily key is not in that file; `mcp_client.py` injects `TAVILY_API_KEY` from the environment at startup and skips the Tavily server with a warning if the key is missing.
 
@@ -180,7 +188,7 @@ All three are external open-source projects used as-is; none of them is reimplem
 
 ## How tool selection works
 
-Tool choice is made by the LLM, not by keyword matching. On every reasoning step the model receives the system prompt (which describes when files, search, fetch, or no tool are appropriate), the conversation so far, and every discovered tool with its name, description and JSON Schema. It either returns tool calls with arguments that match those schemas, or answers directly. Each turn logs the tools the model chose. Real lines from the deployed service:
+Tool choice is made by the LLM, not by keyword matching. On every reasoning step the model receives the system prompt (which describes when files, search, fetch, or no tool are appropriate), the conversation so far, and every discovered tool with its name, description and JSON Schema. It either returns tool calls with arguments that match those schemas, or answers directly. General-knowledge questions are answered from the model alone rather than forcing a tool call. Each turn logs the tools the model chose. Real lines from the deployed service:
 
 ```
 session=log-file tools_used=['list_directory', 'read_text_file']
@@ -221,7 +229,7 @@ Memory lives in the running instance's RAM. It lasts as long as the Cloud Run in
 ### Prerequisites
 
 - Python 3.14
-- Node.js 22.22+ (the fetch server's `readabilipy` dependency needs a recent Node)
+- Node.js 22.22+, 24.15+ or 26 (the fetch server's `readabilipy` dependency needs a recent Node; the container uses Node 26)
 - Docker Desktop
 - Google Cloud CLI (`brew install --cask google-cloud-sdk`)
 - Accounts and keys:
@@ -231,14 +239,16 @@ Memory lives in the running instance's RAM. It lasts as long as the Cloud Run in
 
 ### Install
 
+Unzip the submission (or clone the repository) and move into the project folder:
+
 ```bash
-git clone <this repo> && cd Assignment-1
+cd Assignment-1
 
 python3.14 -m venv env
 source env/bin/activate
-pip install -r requirements.txt
+pip install -r requirements.txt          # includes the Python fetch server, mcp-server-fetch
 
-npm install -g @modelcontextprotocol/server-filesystem tavily-mcp
+npm install -g @modelcontextprotocol/server-filesystem tavily-mcp   # the two Node MCP servers
 
 cp .env.example .env    # then fill in real values
 ```
@@ -260,18 +270,36 @@ cp .env.example .env    # then fill in real values
 
 ## Run locally
 
+**Terminal 1: start the server**
+
 ```bash
 source env/bin/activate
 python main.py
 ```
 
-The server reads `PORT` (default 8080) and binds to `0.0.0.0`. On startup it logs the status of each MCP server, for example:
+The server reads `PORT` (default 8080) and binds to `0.0.0.0`. Wait until it logs the status of each MCP server and `Application startup complete.`:
 
 ```
 MCP servers: {'filesystem': 'ok (14 tools)', 'tavily': 'ok (5 tools)', 'fetch': 'ok (1 tools)'}
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8080 (Press CTRL+C to quit)
 ```
 
-Then send requests to `http://localhost:8080/chat` with the curl commands from **Try it**, or open `http://localhost:8080/docs`.
+Leave this terminal running. The `tools_used` line for each request is printed here.
+
+**Terminal 2: send requests**
+
+```bash
+URL=http://localhost:8080
+
+curl -s -X POST "$URL/chat" -H "Content-Type: application/json" \
+  -d '{"query": "What does sample.txt say?", "session_id": "local-1"}'
+
+curl -s -X POST "$URL/chat" -H "Content-Type: application/json" \
+  -d '{"query": "What is CAP theorem?", "session_id": "local-1"}'
+```
+
+With `URL` set to `http://localhost:8080`, every command in **Try it** also works locally. Alternatively, open `http://localhost:8080/docs` in a browser. Stop the server with `Ctrl+C` in Terminal 1.
 
 ### Run in Docker
 
@@ -279,6 +307,8 @@ Then send requests to `http://localhost:8080/chat` with the curl commands from *
 docker build -t csci599-a1 .
 docker run --rm --env-file .env -p 8080:8080 csci599-a1
 ```
+
+Then send requests to `http://localhost:8080` from a second terminal exactly as above.
 
 The image is a multi-stage build on `python:3.14-slim` that runs as a non-root user. Python dependencies live in a venv at `/opt/venv` so the non-root user can read them. Node comes from the official `node:26-slim` image, because Debian's packaged Node 20 is too old for the fetch server's `jsdom` dependency, and the Node MCP servers are pre-installed with `npm install -g` so cold starts don't download them.
 
@@ -325,7 +355,7 @@ Note: the GCP project is billed to the education credit on my personal Google ac
 | -------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------- |
 | NVIDIA NIM                                         | Free developer key, about 40 requests per minute | $0                                                                  |
 | Tavily                                             | Free tier                                        | $0                                                                  |
-| Google Cloud Run + Cloud Build + Artifact Registry | $50 Google education credit                      | $0.00 for 1 to 11 October 2026 (Billing > Overview, before credits) |
+| Google Cloud Run + Cloud Build + Artifact Registry | $50 Google education credit                      | $0.00 for 1 to 13 October 2026 (Billing > Overview, before credits) |
 
 Billing data can lag by up to a day, so the most recent deploys may not be reflected yet. Cloud Run scales to zero (`--min-instances 0`), so an idle service costs effectively nothing; charges come only from requests, image builds and image storage. One multi-step query makes several LLM calls, so very rapid bursts of requests can hit the NIM free-tier rate limit and respond more slowly.
 
@@ -341,9 +371,16 @@ Billing data can lag by up to a day, so the most recent deploys may not be refle
 ├── mcp_config.json      # MCP server manifest (no secrets)
 ├── workspace/           # Filesystem server root (sample.txt is a test fixture)
 ├── tests/               # pytest suites for the MCP client and the agent
+│   ├── test_mcp_client.py
+│   └── test_agent.py
+├── docs/                # PNG versions of the three architecture diagrams
+│   ├── diagram-1-architecture.png
+│   ├── diagram-2-tool-flow.png
+│   └── diagram-3-deployment.png
 ├── requirements.txt
 ├── Dockerfile           # Multi-stage, non-root, Node 26 for the Node MCP servers
 ├── .dockerignore
+├── .gitignore
 ├── deploy.sh            # Cloud Build + Cloud Run deploy
 ├── .env.example         # Placeholder environment variables
 ├── README.md
