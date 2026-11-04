@@ -1,4 +1,4 @@
-# CSCI 599 Assignment 1: MCP Tool-Using Agent on Cloud Run
+# Agentic MCP Assistant
 
 A LangGraph agent that answers questions over HTTP, decides on its own whether a question needs a tool, calls tools on three MCP servers (filesystem, Tavily search, fetch), remembers the conversation per `session_id`, and runs on Google Cloud Run.
 
